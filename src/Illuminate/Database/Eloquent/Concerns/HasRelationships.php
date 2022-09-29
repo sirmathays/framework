@@ -792,6 +792,37 @@ trait HasRelationships
     }
 
     /**
+     * Get a specified nested relationship.
+     *
+     * @param  string  $relation
+     * @return mixed
+     */
+    public function getNestedRelation($relation)
+    {
+        // If the specified relation is not nested, let's just fetch the
+        // relation.
+        if (! Str::contains($relation, '.')) {
+            return $this->getRelation($relation);
+        }
+
+        [$relation, $sub] = explode('.', $relation, 2);
+
+        // First, let's attempt to get the "root" relation.
+        $relation = $this->getRelation($relation);
+
+        // If the relation is a "many" relation, we map every model instance
+        // within the relation using this method recursively. The result
+        // will be a flattened collection.
+        if ($relation instanceof Collection) {
+            return $this->newCollection($relation->flatMap(function ($relation) use ($sub) {
+                return $relation->getNestedRelation($sub);
+            })->all());
+        }
+
+        return $relation->getNestedRelation($sub);
+    }
+
+    /**
      * Determine if the given relation is loaded.
      *
      * @param  string  $key
@@ -800,6 +831,43 @@ trait HasRelationships
     public function relationLoaded($key)
     {
         return array_key_exists($key, $this->relations);
+    }
+
+    /**
+     * Determine if the given nested relation is loaded.
+     *
+     * @param  string  $key
+     * @return bool
+     */
+    public function nestedRelationLoaded($key)
+    {
+        // If the given relation is not a nested one, let's just check the key.
+        if (! Str::contains($key, '.')) {
+            return $this->relationLoaded($key);
+        }
+
+        [$key, $sub] = explode('.', $key, 2);
+
+        // If the "root" relation is not loaded, we can stop the process here.
+        if (! $this->relationLoaded($key)) {
+            return false;
+        }
+
+        // Now we can trust that the "root" relation is loaded, so let's get it.
+        $relation = $this->getRelation($key);
+
+        // If the relation is a "many" relation, we check every model instance
+        // within the relation using this method recursively. All relations must
+        // have the requested relation loaded, otherwise the result will be false.
+        if ($relation instanceof Collection) {
+            return $relation->every(function ($item) use ($sub) {
+                return $item->nestedRelationLoaded($sub);
+            });
+        }
+
+        // In case of a "one" relation, we run this method recursively in
+        // that model instance.
+        return $relation->nestedRelationLoaded($sub);
     }
 
     /**
